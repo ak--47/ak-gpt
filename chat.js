@@ -66,6 +66,48 @@ class Chat extends BaseGPT {
 			usage: this.getLastUsage()
 		};
 	}
+
+	/**
+	 * Send a message and stream the response as events.
+	 *
+	 * @param {string} message - The user's message
+	 * @param {Object} [opts={}] - Per-message options
+	 * @yields {{ type: string, text?: string, fullText?: string, usage?: Object|null }}
+	 */
+	async *stream(message, opts = {}) {
+		if (!this._initialized) await this.init();
+
+		let fullText = '';
+		const streamIterable = await this._streamMessage(message, opts);
+
+		for await (const chunk of streamIterable) {
+			const delta = chunk.choices?.[0]?.delta;
+			if (delta?.content) {
+				fullText += delta.content;
+				yield { type: 'text', text: delta.content };
+			}
+
+			if (chunk.usage) {
+				this.lastResponseMetadata = {
+					modelVersion: chunk.model || null,
+					requestedModel: this.modelName,
+					promptTokens: chunk.usage.prompt_tokens || 0,
+					responseTokens: chunk.usage.completion_tokens || 0,
+					totalTokens: chunk.usage.total_tokens || 0,
+					stopReason: chunk.choices?.[0]?.finish_reason || null,
+					timestamp: Date.now()
+				};
+			}
+		}
+
+		this.history.push({ role: 'assistant', content: fullText });
+
+		yield {
+			type: 'done',
+			fullText,
+			usage: this.getLastUsage()
+		};
+	}
 }
 
 export default Chat;

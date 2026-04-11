@@ -312,6 +312,13 @@ export interface ChatResponse {
   usage: UsageData | null;
 }
 
+export interface ChatStreamEvent {
+  type: 'text' | 'done';
+  text?: string;
+  fullText?: string;
+  usage?: UsageData | null;
+}
+
 export interface MessageResponse {
   text: string;
   data?: any;
@@ -428,6 +435,7 @@ export declare class Chat extends BaseGPT {
   constructor(options?: ChatOptions);
 
   send(message: string, opts?: Record<string, any>): Promise<ChatResponse>;
+  stream(message: string, opts?: Record<string, any>): AsyncGenerator<ChatStreamEvent, void, unknown>;
 }
 
 export declare class Message extends BaseGPT {
