@@ -1104,6 +1104,42 @@ var Chat = class extends base_default {
       usage: this.getLastUsage()
     };
   }
+  /**
+   * Send a message and stream the response as events.
+   *
+   * @param {string} message - The user's message
+   * @param {Object} [opts={}] - Per-message options
+   * @yields {{ type: string, text?: string, fullText?: string, usage?: Object|null }}
+   */
+  async *stream(message, opts = {}) {
+    if (!this._initialized) await this.init();
+    let fullText = "";
+    const streamIterable = await this._streamMessage(message, opts);
+    for await (const chunk of streamIterable) {
+      const delta = chunk.choices?.[0]?.delta;
+      if (delta?.content) {
+        fullText += delta.content;
+        yield { type: "text", text: delta.content };
+      }
+      if (chunk.usage) {
+        this.lastResponseMetadata = {
+          modelVersion: chunk.model || null,
+          requestedModel: this.modelName,
+          promptTokens: chunk.usage.prompt_tokens || 0,
+          responseTokens: chunk.usage.completion_tokens || 0,
+          totalTokens: chunk.usage.total_tokens || 0,
+          stopReason: chunk.choices?.[0]?.finish_reason || null,
+          timestamp: Date.now()
+        };
+      }
+    }
+    this.history.push({ role: "assistant", content: fullText });
+    yield {
+      type: "done",
+      fullText,
+      usage: this.getLastUsage()
+    };
+  }
 };
 var chat_default = Chat;
 
@@ -1624,6 +1660,30 @@ var CodeAgent = class extends base_default {
     this.codeMaxRetries = options.maxRetries ?? 3;
     this.skills = options.skills || [];
     this.envOverview = options.envOverview || "";
+    this.customTools = (options.tools || []).map((t) => {
+      if (t.type === "function" && t.function) {
+        return {
+          type: "function",
+          function: {
+            name: t.function.name,
+            description: t.function.description || "",
+            parameters: t.function.parameters || { type: "object", properties: {} }
+          }
+        };
+      }
+      return {
+        type: "function",
+        function: {
+          name: t.name || "",
+          description: t.description || "",
+          parameters: t.parameters || t.input_schema || t.inputSchema || t.parametersJsonSchema || { type: "object", properties: {} }
+        }
+      };
+    });
+    this.toolExecutor = options.toolExecutor || null;
+    if (this.customTools.length > 0 && !this.toolExecutor) {
+      throw new Error("CodeAgent: tools provided without a toolExecutor.");
+    }
     this._codebaseContext = null;
     this._contextGathered = false;
     this._stopped = false;
@@ -1738,6 +1798,9 @@ var CodeAgent = class extends base_default {
         }
       });
     }
+    for (const t of this.customTools) {
+      tools.push(t);
+    }
     return tools;
   }
   // ── Init ─────────────────────────────────────────────────────────────────
@@ -1816,7 +1879,7 @@ var CodeAgent = class extends base_default {
           continue;
         }
         try {
-          const fullPath = (0, import_node_path.join)(this.workingDirectory, resolved);
+          const fullPath = (0, import_node_path.isAbsolute)(resolved) ? resolved : (0, import_node_path.join)(this.workingDirectory, resolved);
           const content = await (0, import_promises2.readFile)(fullPath, "utf-8");
           importantFileContents.push({ path: resolved, content });
         } catch (e) {
@@ -1831,6 +1894,7 @@ var CodeAgent = class extends base_default {
    * @private
    */
   _resolveImportantFile(filename, fileTreeLines) {
+    if ((0, import_node_path.isAbsolute)(filename)) return filename;
     const exact = fileTreeLines.find((line) => line === filename);
     if (exact) return exact;
     const partial = fileTreeLines.find(
@@ -2227,12 +2291,30 @@ ${this.envOverview}`;
           data: { tool: "use_skill", skillName: skill.name, content: skill.content, found: true }
         };
       }
-      default:
+      default: {
+        if (this.toolExecutor) {
+          try {
+            const result = await this.toolExecutor(name, input);
+            const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+            return {
+              output: resultStr,
+              type: "tool",
+              data: { tool: name, args: input, result }
+            };
+          } catch (err) {
+            return {
+              output: `Tool "${name}" failed: ${err.message}`,
+              type: "tool",
+              data: { tool: name, args: input, error: err.message }
+            };
+          }
+        }
         return {
           output: `Unknown tool: ${name}`,
           type: "unknown",
           data: { tool: name }
         };
+      }
     }
   }
   // ── Non-Streaming Chat ───────────────────────────────────────────────────
@@ -2400,6 +2482,9 @@ ${this.envOverview}`;
         }
         if (toolName === "use_skill") {
           yield { type: "skill", skillName: data.skillName, content: data.content, found: data.found };
+        }
+        if (type === "tool") {
+          yield { type: "tool", toolName, args: data.args, result: data.result, error: data.error };
         }
         const isExecutingTool = EXECUTING_TOOLS.has(toolName) || toolName === "fix_code" && parsedArgs.execute;
         if (isExecutingTool) {
