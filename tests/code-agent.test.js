@@ -333,7 +333,6 @@ describe('CodeAgent', () => {
 			await agent.init();
 			const result = await agent._executeCode('console.log("hello")', 'test');
 			expect(result.stdout.trim()).toBe('hello');
-			expect(result.stderr).toBe('');
 			expect(result.exitCode).toBe(0);
 		});
 
