@@ -137,7 +137,8 @@ class Transformer extends BaseGPT {
 			answerKey: this.answerKey,
 			contextKey: this.contextKey,
 			explanationKey: this.explanationKey,
-			systemPromptKey: this.systemPromptKey
+			systemPromptKey: this.systemPromptKey,
+			format: 'json'
 		});
 	}
 
