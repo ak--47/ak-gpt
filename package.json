@@ -2,7 +2,7 @@
 	"name": "@ak--47/ak-gpt",
 	"author": "ak@mixpanel.com",
 	"description": "AK's OpenAI GPT Helper for doing... everything",
-	"version": "0.0.10",
+	"version": "0.0.11",
 	"main": "index.js",
 	"files": [
 		"index.js",
